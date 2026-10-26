@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore Piazza XX Settembre in 3D. Hover to highlight features and click to inspect their attributes.">
+  <title>Piazza XX Settembre — 3D Feature Picking</title>
+  <script>
+    window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/";
+  </script>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Cesium.js"></script>
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Widgets/widgets.css">
+  <style>
+    html, body, #scene, #cesiumContainer { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #17232d; color: #fff; font-family: system-ui, sans-serif; }
+    #scene { position: relative; }
+    [hidden] { display: none !important; }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:focus-visible { outline: 3px solid #8bdcff; outline-offset: 3px; }
+    #attribute-panel {
+      position: absolute; top: 116px; right: 16px; z-index: 30;
+      display: flex; flex-direction: column; box-sizing: border-box;
+      width: 440px; max-width: calc(100% - 32px); max-height: calc(100% - 140px);
+      border: 1px solid #a8c3d266; border-radius: 7px;
+      background: #1a2831f2; box-shadow: 0 5px 24px #0008;
+    }
+    .panel-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px; border-bottom: 1px solid #ffffff26;
+    }
+    .panel-header div { min-width: 0; flex: 1; }
+    .panel-header p { margin: 0 0 3px; color: #9cc3db; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    #feature-title { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+    #close-attributes {
+      flex: 0 0 32px; height: 32px; padding: 0; border: 0; border-radius: 4px;
+      background: #ffffff13; font-size: 24px; line-height: 1;
+    }
+    #close-attributes:hover { background: #ffffff2b; }
+    .attribute-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+    th, td { padding: 8px 12px; border-bottom: 1px solid #ffffff14; vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+    th { width: 40%; color: #d8e7ee; font-weight: 500; }
+    td { white-space: pre-wrap; }
+    tr:nth-child(odd) { background: #ffffff08; }
+    #attribute-note { margin: 0; padding: 12px; color: #cad8e0; font-size: 13px; line-height: 1.5; }
+    #scene-status {
+      position: absolute; bottom: 22px; left: 50%; z-index: 40;
+      box-sizing: border-box; width: max-content; max-width: calc(100% - 32px);
+      margin: 0; padding: 10px 14px; transform: translateX(-50%);
+      border-radius: 5px; background: #1a2831f0; font-size: 14px; text-align: center;
+    }
+    #scene-status[data-error="true"] { background: #6e2929; }
+    @media (max-width: 600px) {
+      #attribute-panel { top: auto; right: 8px; bottom: 12px; max-width: calc(100% - 16px); max-height: 48%; }
+      th, td { padding: 7px 9px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="scene" aria-label="Piazza XX Settembre interactive 3D scene">
+    <div id="cesiumContainer" tabindex="-1"></div>
+    <aside id="attribute-panel" aria-labelledby="feature-title" hidden>
+      <header class="panel-header">
+        <div><p>Feature attributes</p><h2 id="feature-title">Selected feature</h2></div>
+        <button id="close-attributes" type="button" aria-label="Close attributes and clear selection" title="Clear selection (Escape)">×</button>
+      </header>
+      <div class="attribute-scroll">
+        <table aria-label="Selected feature properties"><tbody id="attribute-rows"></tbody></table>
+        <p id="attribute-note" hidden></p>
+      </div>
+    </aside>
+    <p id="scene-status" role="status" aria-live="polite">Loading Piazza XX Settembre...</p>
+  </main>
+  <noscript>This scene requires JavaScript and an internet connection.</noscript>
+  <script>
+    // All dependencies are remote. This HTML can also be opened with file://.
+    const statusElement = document.getElementById("scene-status");
+    function showStatus(message, isError = false) {
+      statusElement.textContent = message;
+      statusElement.dataset.error = String(isError);
+      statusElement.hidden = false;
+    }
+
+    async function initializeScene() {
+      if (!window.Cesium) {
+        throw new Error("CesiumJS could not load. Check your internet connection and reload this file.");
+      }
+      Cesium.Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IkZsai1Gbm9RVExsWTVhYTMiLCJqdGkiOiJkNjFlYWFhOC01ODhmLTQ2NmEtOWVjMi03OGU1ZDA2ODkwYWEiLCJpZCI6NTE2ODM5LCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3OTEzNTQxNzN9.Z9y5wE34LGfSX-kC8z0OAc0DyvtsOsvElJxWsJsAgUQ";
+      const ASSET_ID = 6085532;
+      const BRIGHTNESS = 1.0;
+
+      // Chrome blocks module workers bootstrapped from file-origin blob URLs.
+      // Repackage only Cesium's CDN import bootstrap as a data URL so this
+      // single HTML file can be opened directly without a local web server.
+      if (window.location.protocol === "file:") {
+        const NativeWorker = window.Worker;
+        window.Worker = class extends NativeWorker {
+          constructor(url, options) {
+            if (options?.type === "module" && String(url).startsWith("blob:null/")) {
+              // This synchronous read accesses an in-memory Blob, not the network.
+              const request = new XMLHttpRequest();
+              request.open("GET", url, false);
+              request.send();
+              const script = request.responseText;
+              if (script.startsWith(`import "${window.CESIUM_BASE_URL}Workers/`)) {
+                url = `data:application/javascript,${encodeURIComponent(script)}`;
+              }
+            }
+            super(url, options);
+          }
+        };
+      }
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        animation: false, timeline: false, baseLayerPicker: false,
+        geocoder: false, homeButton: false, sceneModePicker: false,
+        navigationHelpButton: false, fullscreenButton: false,
+        infoBox: false, selectionIndicator: false,
+        shadows: false, shouldAnimate: false,
+        // Smooth zero-height reference surface; no DTM or World Terrain.
+        // WGS84 ellipsoid heights are not geoid-corrected mean-sea-level heights.
+        terrainProvider: new Cesium.EllipsoidTerrainProvider({ ellipsoid: Cesium.Ellipsoid.WGS84 }),
+      });
+      viewer.scene.highDynamicRange = false;
+      viewer.scene.globe.enableLighting = false;
+      viewer.scene.shadowMap.enabled = false;
+      viewer.scene.postProcessStages.ambientOcclusion.enabled = false;
+      viewer.bottomContainer.style.display = "none";
+      // This standalone page has no Sandcastle host or console panel.
+
+      function createUnlitShader() {
+        return new Cesium.CustomShader({
+          lightingModel: Cesium.LightingModel.UNLIT,
+          mode: Cesium.CustomShaderMode.MODIFY_MATERIAL,
+
+          uniforms: {
+            u_brightness: {
+              type: Cesium.UniformType.FLOAT,
+              value: BRIGHTNESS,
+            },
+          },
+
+          fragmentShaderText: `
+            void fragmentMain(
+              FragmentInput fsInput,
+              inout czm_modelMaterial material
+            ) {
+              material.diffuse *= u_brightness;
+            }
+          `,
+        });
+      }
+      (function addCompassOnly() {
+        const container =
+          viewer.container.querySelector(".cesium-viewer") || viewer.container;
+
+        if (container.querySelector("#scene-compass-only")) return;
+
+        const compass = document.createElement("button");
+        compass.id = "scene-compass-only";
+        compass.type = "button";
+        compass.title = "Click to face north";
+        compass.setAttribute("aria-label", "Reset camera heading to north");
+
+        Object.assign(compass.style, {
+          position: "absolute",
+          top: "12px",
+          right: "12px",
+          width: "80px",
+          height: "92px",
+          padding: "0",
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          zIndex: "100",
+        });
+
+        compass.innerHTML = `
+          <svg viewBox="0 0 80 92" width="80" height="92"
+            style="overflow:visible" aria-hidden="true">
+
+            <circle cx="40" cy="50" r="33"
+              fill="#263a43" fill-opacity="0.9" stroke="#dce7ec"/>
+
+            <g data-compass-dial>
+              <text x="40" y="12" text-anchor="middle"
+                fill="white" font-family="sans-serif" font-size="13"
+                font-weight="bold">N</text>
+
+              <circle cx="40" cy="50" r="29"
+                fill="none" stroke="#6e9fb9" stroke-width="3"/>
+
+              <g fill="none" stroke="white" stroke-width="1.4">
+                <path d="M40 18v9 M40 73v9 M8 50h9 M63 50h9"/>
+                <path d="M17.4 27.4l5.7 5.7 M56.9 66.9l5.7 5.7
+                         M17.4 72.6l5.7-5.7 M56.9 33.1l5.7-5.7"/>
+              </g>
+
+              <path d="M40 20l-3 7h6z" fill="white"/>
+            </g>
+
+            <circle cx="40" cy="50" r="18"
+              fill="#263a43" stroke="white"/>
+
+            <g fill="none" stroke="white" stroke-width="1">
+              <circle cx="40" cy="50" r="11"/>
+              <ellipse cx="40" cy="50" rx="5" ry="11"/>
+              <ellipse cx="40" cy="50" rx="11" ry="4"/>
+              <path d="M29 50h22 M40 39v22"/>
+            </g>
+          </svg>
+        `;
+
+        container.appendChild(compass);
+
+        const dial = compass.querySelector("[data-compass-dial]");
+
+        function updateCompass() {
+          const degrees = -Cesium.Math.toDegrees(viewer.camera.heading);
+          dial.setAttribute("transform", `rotate(${degrees} 40 50)`);
+        }
+
+        viewer.scene.postRender.addEventListener(updateCompass);
+        updateCompass();
+
+        compass.addEventListener("click", () => {
+          const camera = viewer.camera;
+
+          camera.flyTo({
+            destination: Cesium.Cartesian3.clone(camera.positionWC),
+            orientation: {
+              heading: 0.0,
+              pitch: camera.pitch,
+              roll: 0.0,
+            },
+            duration: 0.6,
+          });
+        });
+      })();
+
+      const panel = document.getElementById("attribute-panel");
+      const titleElement = document.getElementById("feature-title");
+      const rowsElement = document.getElementById("attribute-rows");
+      const noteElement = document.getElementById("attribute-note");
+      let tileset;
+      let hovered;
+      let selected;
+      let loadFailed = false;
+
+      const HOVER_COLOR = Cesium.Color.LIME;
+      const SELECTED_COLOR = Cesium.Color.DODGERBLUE;
+      let hoverOutline;
+      let selectedOutline;
+      const originalColors = new WeakMap();
+      if (Cesium.PostProcessStageLibrary.isSilhouetteSupported(viewer.scene)) {
+        hoverOutline = Cesium.PostProcessStageLibrary.createEdgeDetectionStage();
+        hoverOutline.uniforms.color = HOVER_COLOR;
+        hoverOutline.uniforms.length = 0.5;
+        hoverOutline.selected = [];
+        selectedOutline = Cesium.PostProcessStageLibrary.createEdgeDetectionStage();
+        selectedOutline.uniforms.color = SELECTED_COLOR;
+        selectedOutline.uniforms.length = 0.5;
+        selectedOutline.selected = [];
+        viewer.scene.postProcessStages.add(
+          Cesium.PostProcessStageLibrary.createSilhouetteStage([hoverOutline, selectedOutline])
+        );
+      }
+
+      function isFeature(picked) {
+        return Cesium.defined(picked) && typeof picked.getPropertyIds === "function" &&
+          typeof picked.getProperty === "function";
+      }
+
+      function pickFeature(position) {
+        const picked = viewer.scene.pick(position);
+        if (!Cesium.defined(picked)) return undefined;
+        if (isFeature(picked)) return picked;
+        // A raw mesh can still be picked, but may contain no feature metadata.
+        if (picked.primitive === tileset || picked.content?.tileset === tileset) return picked;
+        return undefined;
+      }
+
+      function restoreColor(feature) {
+        const original = feature && originalColors.get(feature);
+        if (original) {
+          feature.color = original;
+          originalColors.delete(feature);
+        }
+      }
+
+      function tintFeature(feature, color) {
+        if (!isFeature(feature) || !Cesium.defined(feature.color)) return;
+        if (!originalColors.has(feature)) originalColors.set(feature, Cesium.Color.clone(feature.color));
+        feature.color = color;
+      }
+
+      function setHover(feature) {
+        if (hovered === feature) return;
+        if (!hoverOutline && hovered !== selected) restoreColor(hovered);
+        hovered = feature;
+        if (hoverOutline) hoverOutline.selected = feature && feature !== selected ? [feature] : [];
+        else if (feature !== selected) tintFeature(feature, HOVER_COLOR);
+        viewer.canvas.style.cursor = feature ? "pointer" : "";
+      }
+
+      function clearHover() {
+        setHover(undefined);
+      }
+
+      function clearSelection(hidePanel = true) {
+        if (!selectedOutline) restoreColor(selected);
+        selected = undefined;
+        if (selectedOutline) selectedOutline.selected = [];
+        if (hidePanel) {
+          panel.hidden = true;
+          rowsElement.replaceChildren();
+        }
+      }
+
+      function propertyIds(feature) {
+        return isFeature(feature) ? feature.getPropertyIds() : [];
+      }
+
+      function featureName(feature) {
+        const ids = propertyIds(feature);
+        for (const candidate of ["name", "gml:name", "gml:id", "id", "objectid", "elementid"]) {
+          const id = ids.find((value) => value.toLowerCase() === candidate);
+          if (id) {
+            const value = feature.getProperty(id);
+            if (value !== undefined && value !== null && String(value).length > 0) return String(value);
+          }
+        }
+        return Cesium.defined(feature.featureId) ? `Feature ${feature.featureId}` : "Piazza XX Settembre";
+      }
+
+      function formatValue(value) {
+        if (value === undefined || value === null) return "—";
+        if (typeof value === "object") {
+          try {
+            return JSON.stringify(value, (_, item) => typeof item === "bigint" ? String(item) : item, 2) ?? String(value);
+          } catch { return String(value); }
+        }
+        return String(value);
+      }
+
+      function addRow(name, value) {
+        const row = document.createElement("tr");
+        const heading = document.createElement("th");
+        heading.scope = "row";
+        heading.textContent = name;
+        const cell = document.createElement("td");
+        cell.textContent = formatValue(value);
+        row.append(heading, cell);
+        rowsElement.appendChild(row);
+      }
+
+      function showAttributes(feature) {
+        rowsElement.replaceChildren();
+        titleElement.textContent = featureName(feature);
+        const ids = propertyIds(feature);
+        for (const id of ids) addRow(id, feature.getProperty(id));
+        noteElement.hidden = ids.length > 0;
+        noteElement.textContent = ids.length > 0 ? "" :
+          "No per-feature attributes are embedded in this part of the dataset.";
+        if (ids.length === 0 && Cesium.defined(feature.featureId)) addRow("Feature ID", feature.featureId);
+        panel.hidden = false;
+      }
+
+      let pendingHover;
+      let hoverFrame;
+      viewer.screenSpaceEventHandler.setInputAction((movement) => {
+        pendingHover = Cesium.Cartesian2.clone(movement.endPosition, pendingHover);
+        if (hoverFrame) return;
+        hoverFrame = requestAnimationFrame(() => {
+          hoverFrame = undefined;
+          const feature = pickFeature(pendingHover);
+          setHover(feature);
+        });
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+      viewer.canvas.addEventListener("mouseleave", () => {
+        cancelAnimationFrame(hoverFrame);
+        hoverFrame = undefined;
+        clearHover();
+      });
+
+      viewer.screenSpaceEventHandler.setInputAction((movement) => {
+        const feature = pickFeature(movement.position);
+        clearHover();
+        clearSelection();
+        if (!feature) return;
+        selected = feature;
+        if (selectedOutline) selectedOutline.selected = [feature];
+        else tintFeature(feature, SELECTED_COLOR);
+        showAttributes(feature);
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+      document.getElementById("close-attributes").addEventListener("click", () => {
+        clearHover();
+        clearSelection();
+        viewer.canvas.focus({ preventScroll: true });
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") { clearHover(); clearSelection(); }
+      });
+
+      // Clear references to unloaded content; keep the displayed attribute snapshot.
+      function containsFeature(content, feature) {
+        if (!content || !feature) return false;
+        if (feature.content === content) return true;
+        if (content.innerContents?.some((inner) => containsFeature(inner, feature))) return true;
+        const id = feature.featureId;
+        return Number.isInteger(id) && id >= 0 && id < content.featuresLength &&
+          content.getFeature(id) === feature;
+      }
+
+      viewer.scene.renderError.addEventListener(() => {
+        loadFailed = true;
+        showStatus("The 3D scene stopped rendering. Reload the page in a browser with WebGL support.", true);
+      });
+
+      try {
+        tileset = await Cesium.Cesium3DTileset.fromIonAssetId(ASSET_ID, {
+          customShader: createUnlitShader(),
+          shadows: Cesium.ShadowMode.DISABLED,
+        });
+        const defaultStyle = tileset.asset.extras?.ion?.defaultStyle;
+        if (Cesium.defined(defaultStyle)) tileset.style = new Cesium.Cesium3DTileStyle(defaultStyle);
+        tileset.tileFailed.addEventListener(() => {
+          loadFailed = true;
+          showStatus("Some tiles could not load. Check your connection and ion asset access.", true);
+        });
+        const removeReadyListener = tileset.tileVisible.addEventListener(() => {
+          removeReadyListener();
+          if (!loadFailed) statusElement.hidden = true;
+        });
+        tileset.tileUnload.addEventListener((tile) => {
+          if (containsFeature(tile.content, hovered)) clearHover();
+          if (containsFeature(tile.content, selected)) clearSelection(false);
+        });
+        viewer.scene.primitives.add(tileset);
+        await viewer.zoomTo(tileset);
+      } catch {
+        loadFailed = true;
+        showStatus("Could not load Piazza XX Settembre (ion asset 6085532). Check your connection and the token's access to this asset.", true);
+      }
+    }
+
+    initializeScene().catch((error) => {
+      showStatus(error.message || "The scene could not start. Check your connection and WebGL support.", true);
+    });
+  </script>
+</body>
+</html>
