@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Explore Drobeta-Turnu Severin with 3D buildings, imagery, hover highlighting, and click-to-view attributes.">
+  <meta name="description" content="Explore Drobeta-Turnu Severin with 3D buildings, hover highlighting, and click-to-view attributes.">
   <title>Drobeta-Turnu Severin — 3D Feature Picking</title>
   <script>
     window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/";
@@ -69,7 +69,7 @@
         <p id="attribute-note" hidden></p>
       </div>
     </aside>
-    <p id="scene-status" role="status" aria-live="polite">Loading Drobeta-Turnu Severin buildings and imagery...</p>
+    <p id="scene-status" role="status" aria-live="polite">Loading Drobeta-Turnu Severin buildings...</p>
   </main>
   <noscript>This scene requires JavaScript and an internet connection.</noscript>
   <script>
@@ -87,7 +87,6 @@
       }
       Cesium.Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IkZsai1Gbm9RVExsWTVhYTMiLCJqdGkiOiJkNjFlYWFhOC01ODhmLTQ2NmEtOWVjMi03OGU1ZDA2ODkwYWEiLCJpZCI6NTE2ODM5LCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3OTEzNTQxNzN9.Z9y5wE34LGfSX-kC8z0OAc0DyvtsOsvElJxWsJsAgUQ";
       const ASSET_ID = 6044752;
-      const IMAGERY_ASSET_ID = 6085593;
       const BRIGHTNESS = 1.0;
 
       // Chrome blocks module workers bootstrapped from file-origin blob URLs.
@@ -247,12 +246,6 @@
       let hovered;
       let selected;
       let loadFailed = false;
-      let meshVisible = false;
-      let imageryReady = false;
-
-      function updateLoadingStatus() {
-        if (meshVisible && imageryReady && !loadFailed) statusElement.hidden = true;
-      }
 
       const HOVER_COLOR = Cesium.Color.LIME;
       const SELECTED_COLOR = Cesium.Color.DODGERBLUE;
@@ -426,29 +419,6 @@
         showStatus("The 3D scene stopped rendering. Reload the page in a browser with WebGL support.", true);
       });
 
-      // The supplied imagery is added above the existing worldwide base layer.
-      // Load it independently so either dataset remains usable if the other fails.
-      async function loadImagery() {
-        try {
-          const provider = await Cesium.IonImageryProvider.fromAssetId(IMAGERY_ASSET_ID);
-          provider.errorEvent.addEventListener((error) => {
-            // Missing edge tiles can use Cesium's parent/base imagery fallback.
-            // Preserve feedback for connection, permission, and server failures.
-            if (error.error?.statusCode === 404 &&
-                Number.isInteger(error.x) && Number.isInteger(error.y) && Number.isInteger(error.level)) return;
-            loadFailed = true;
-            showStatus("Some imagery tiles could not load. Check your connection and ion imagery access.", true);
-          });
-          viewer.imageryLayers.addImageryProvider(provider);
-          imageryReady = true;
-          updateLoadingStatus();
-        } catch {
-          loadFailed = true;
-          showStatus("Could not load Drobeta-Turnu Severin imagery (ion asset 6085593). Check your connection and the token's access to this asset.", true);
-        }
-      }
-      const imageryLoading = loadImagery();
-
       try {
         tileset = await Cesium.Cesium3DTileset.fromIonAssetId(ASSET_ID, {
           customShader: createUnlitShader(),
@@ -462,8 +432,7 @@
         });
         const removeReadyListener = tileset.tileVisible.addEventListener(() => {
           removeReadyListener();
-          meshVisible = true;
-          updateLoadingStatus();
+          if (!loadFailed) statusElement.hidden = true;
         });
         tileset.tileUnload.addEventListener((tile) => {
           if (containsFeature(tile.content, hovered)) clearHover();
@@ -475,7 +444,6 @@
         loadFailed = true;
         showStatus("Could not load Drobeta-Turnu Severin (ion asset 6044752). Check your connection and the token's access to this asset.", true);
       }
-      await imageryLoading;
     }
 
     initializeScene().catch((error) => {
